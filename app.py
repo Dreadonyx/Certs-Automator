@@ -31,6 +31,14 @@ IMAGE_FORMATS = {
     'image/gif':  ('GIF',  'gif'),
 }
 
+# Export format override mapping (user-selected export format → PIL format, ext)
+EXPORT_FORMAT_MAP = {
+    'png':  ('PNG',  'png'),
+    'jpg':  ('JPEG', 'jpg'),
+    'webp': ('WEBP', 'webp'),
+    'pdf':  ('PDF',  'pdf'),
+}
+
 
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
@@ -87,7 +95,7 @@ def draw_certificate(template_image, name, department, settings):
 def image_to_bytes(image, pil_format):
     """Save PIL image to bytes in the given format."""
     img_io = io.BytesIO()
-    if pil_format == 'JPEG' and image.mode in ('RGBA', 'P'):
+    if pil_format in ('JPEG', 'PDF') and image.mode in ('RGBA', 'P'):
         image = image.convert('RGB')
     image.save(img_io, pil_format)
     img_io.seek(0)
@@ -162,33 +170,67 @@ def generate_certificate():
 
 @app.route('/generate-batch', methods=['POST'])
 def generate_batch():
-    """Generate certificates for all participants and return a ZIP file."""
+    """Generate certificates for all participants.
+
+    Returns a merged PDF if exportFormat='pdf', otherwise a ZIP of images.
+    """
     try:
         data = request.json
-        template_image, pil_format, ext = decode_template(data.get('template'))
+        template_image, default_pil_format, default_ext = decode_template(data.get('template'))
         participants = data.get('participants', [])
         settings = data.get('settings', {})
 
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for participant in participants:
-                certificate = draw_certificate(
-                    template_image,
-                    name=participant['name'],
-                    department=participant.get('department', ''),
-                    settings=settings,
-                )
-                img_bytes = image_to_bytes(certificate, pil_format)
-                safe_name = participant['name'].replace(' ', '_')
-                zf.writestr(f"{safe_name}_certificate.{ext}", img_bytes)
+        export_fmt = settings.get('exportFormat', 'same')
+        if export_fmt in EXPORT_FORMAT_MAP:
+            pil_format, ext = EXPORT_FORMAT_MAP[export_fmt]
+        else:
+            pil_format, ext = default_pil_format, default_ext
 
-        zip_buffer.seek(0)
-        return send_file(
-            zip_buffer,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name='certificates.zip',
-        )
+        # Build all certificate images
+        certificates = []
+        for participant in participants:
+            cert = draw_certificate(
+                template_image,
+                name=participant['name'],
+                department=participant.get('department', ''),
+                settings=settings,
+            )
+            if pil_format in ('JPEG', 'PDF') and cert.mode in ('RGBA', 'P'):
+                cert = cert.convert('RGB')
+            certificates.append(cert)
+
+        if pil_format == 'PDF':
+            # Merge all certificates into a single multi-page PDF
+            pdf_buffer = io.BytesIO()
+            if certificates:
+                certificates[0].save(
+                    pdf_buffer,
+                    'PDF',
+                    save_all=True,
+                    append_images=certificates[1:],
+                )
+            pdf_buffer.seek(0)
+            return send_file(
+                pdf_buffer,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name='certificates.pdf',
+            )
+        else:
+            # Return a ZIP of individual image files
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for participant, cert in zip(participants, certificates):
+                    img_bytes = image_to_bytes(cert, pil_format)
+                    safe_name = participant['name'].replace(' ', '_')
+                    zf.writestr(f"{safe_name}_certificate.{ext}", img_bytes)
+            zip_buffer.seek(0)
+            return send_file(
+                zip_buffer,
+                mimetype='application/zip',
+                as_attachment=True,
+                download_name='certificates.zip',
+            )
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
