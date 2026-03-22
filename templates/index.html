@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificate Generator - AKIRA CTF</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🎓 Certificate Generator</h1>
+        <p class="subtitle">AKIRA CTF - Velammal Engineering College</p>
+
+        <div class="info-box">
+            <strong>📋 Instructions:</strong> Upload your certificate template, paste participant data (Name and Department), adjust text positioning, and generate all certificates!
+        </div>
+
+        <!-- Step 1: Upload Certificate Template -->
+        <div class="section">
+            <h2>Step 1: Upload Certificate Template</h2>
+            <div class="upload-area" id="templateUpload">
+                <p style="font-size: 1.2em; margin-bottom: 10px;">📤 Click or drag certificate image here</p>
+                <p style="color: var(--text-light); font-size: 0.9em;">Supports PNG, JPG, WebP, BMP, TIFF, GIF</p>
+                <input type="file" id="templateFile" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff,image/gif">
+            </div>
+            <div class="preview" id="templatePreview"></div>
+        </div>
+
+        <!-- Step 2: Add Participant Data -->
+        <div class="section">
+            <h2>Step 2: Add Participant Data</h2>
+            
+            <div style="margin-bottom: 20px;">
+                <h3 style="margin-bottom: 10px;">Option A: Upload CSV File</h3>
+                <div class="upload-area" id="csvUpload" style="padding: 20px;">
+                    <p style="font-size: 1.1em; margin-bottom: 8px;">📊 Click or drag CSV file here</p>
+                    <p style="color: var(--text-light); font-size: 0.85em;">Format: Name, Department (with or without headers)</p>
+                    <input type="file" id="csvFile" accept=".csv">
+                </div>
+                <div id="csvStatus" style="margin-top: 10px; display: none;">
+                    <div class="alert alert-success">
+                        ✅ <span id="csvCount"></span> participants loaded from CSV
+                    </div>
+                </div>
+            </div>
+
+            <div style="text-align: center; margin: 20px 0; color: var(--text-light); font-weight: 600;">
+                — OR —
+            </div>
+
+            <div>
+                <h3 style="margin-bottom: 10px;">Option B: Paste Manually</h3>
+                <p style="margin-bottom: 10px; color: var(--text-medium);">Paste from Google Sheets or type manually (Name, Department per line)</p>
+                <textarea id="participantData" placeholder="Example:
+John Doe, Computer Science
+Jane Smith, ECE
+Robert Kumar, AI & DS"></textarea>
+                <p style="margin-top: 10px; color: var(--text-light); font-size: 0.9em;">Format: Name, Department (one per line)</p>
+            </div>
+        </div>
+
+        <!-- Step 3: Configure Text Settings -->
+        <div class="section">
+            <h2>Step 3: Configure Text Placement</h2>
+            
+            <h3>Name Settings</h3>
+            <div class="controls">
+                <div class="control-group">
+                    <label>Name X Position (px)</label>
+                    <input type="number" id="nameX" value="420">
+                </div>
+                <div class="control-group">
+                    <label>Name Y Position (px)</label>
+                    <input type="number" id="nameY" value="270">
+                </div>
+                <div class="control-group">
+                    <label>Name Font Size (px)</label>
+                    <input type="number" id="nameFontSize" value="38">
+                </div>
+                <div class="control-group">
+                    <label>Name Font</label>
+                    <select id="nameFont">
+                        <option value="georgia.ttf">Georgia</option>
+                        <option value="times.ttf">Times New Roman</option>
+                        <option value="arial.ttf">Arial</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Name Color</label>
+                    <input type="color" id="nameColor" value="#000000">
+                </div>
+            </div>
+
+            <h3>Department Settings</h3>
+            <div class="controls">
+                <div class="control-group">
+                    <label>Department X Position (px)</label>
+                    <input type="number" id="deptX" value="76">
+                </div>
+                <div class="control-group">
+                    <label>Department Y Position (px)</label>
+                    <input type="number" id="deptY" value="303">
+                </div>
+                <div class="control-group">
+                    <label>Department Font Size (px)</label>
+                    <input type="number" id="deptFontSize" value="32">
+                </div>
+                <div class="control-group">
+                    <label>Department Font</label>
+                    <select id="deptFont">
+                        <option value="georgia.ttf">Georgia</option>
+                        <option value="times.ttf">Times New Roman</option>
+                        <option value="arial.ttf">Arial</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Department Color</label>
+                    <input type="color" id="deptColor" value="#000000">
+                </div>
+            </div>
+
+            <button class="btn" id="previewBtn" disabled>👁️ Preview First Certificate</button>
+            <p style="margin-top: 10px; color: var(--text-light); font-size: 0.9em; text-align: center;">
+                💡 Tip: Change any setting above and click "Preview" again to see updates
+            </p>
+        </div>
+
+        <!-- Preview Area -->
+        <div id="previewArea" style="display: none;">
+            <div class="section">
+                <h2>Preview (First Certificate)</h2>
+                <div class="preview">
+                    <img id="previewImage" style="max-width: 100%; border-radius: 10px;">
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Generate All -->
+        <div class="section">
+            <h2>Step 4: Generate All Certificates</h2>
+            <button class="btn" id="generateBtn" disabled>🚀 Generate All Certificates</button>
+            
+            <div class="progress" id="progressBar">
+                <div class="status" id="statusText">Generating certificates...</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill">0%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let templateImage = null;
+        let participants = [];
+        let csvParticipants = []; // Store participants from CSV
+
+        // Handle template upload
+        const templateUpload = document.getElementById('templateUpload');
+        const templateFile = document.getElementById('templateFile');
+        const templatePreview = document.getElementById('templatePreview');
+
+        templateUpload.addEventListener('click', () => templateFile.click());
+
+        templateUpload.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            templateUpload.classList.add('dragover');
+        });
+
+        templateUpload.addEventListener('dragleave', () => {
+            templateUpload.classList.remove('dragover');
+        });
+
+        templateUpload.addEventListener('drop', (e) => {
+            e.preventDefault();
+            templateUpload.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            const allowed = ['image/png','image/jpeg','image/webp','image/bmp','image/tiff','image/gif'];
+            if (file && allowed.includes(file.type)) {
+                loadTemplate(file);
+            } else if (file) {
+                alert('Unsupported file type. Please use PNG, JPG, WebP, BMP, TIFF, or GIF.');
+            }
+        });
+
+        templateFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                loadTemplate(file);
+            }
+        });
+
+        function loadTemplate(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                templateImage = e.target.result;
+                templatePreview.innerHTML = `<img src="${e.target.result}" class="template-preview" alt="Certificate Template">`;
+                document.getElementById('previewBtn').disabled = false;
+                document.getElementById('generateBtn').disabled = false;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Handle CSV upload
+        const csvUpload = document.getElementById('csvUpload');
+        const csvFile = document.getElementById('csvFile');
+        const csvStatus = document.getElementById('csvStatus');
+        const csvCount = document.getElementById('csvCount');
+
+        csvUpload.addEventListener('click', () => csvFile.click());
+
+        csvUpload.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            csvUpload.classList.add('dragover');
+        });
+
+        csvUpload.addEventListener('dragleave', () => {
+            csvUpload.classList.remove('dragover');
+        });
+
+        csvUpload.addEventListener('drop', (e) => {
+            e.preventDefault();
+            csvUpload.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.endsWith('.csv')) {
+                loadCSV(file);
+            }
+        });
+
+        csvFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                loadCSV(file);
+            }
+        });
+
+        async function loadCSV(file) {
+            const formData = new FormData();
+            formData.append('csvFile', file);
+
+            try {
+                const response = await fetch('/parse-csv', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    csvParticipants = result.participants;
+                    csvStatus.style.display = 'block';
+                    csvCount.textContent = `${result.count}`;
+                    
+                    // Clear manual textarea
+                    document.getElementById('participantData').value = '';
+                } else {
+                    alert('Error parsing CSV: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error uploading CSV: ' + error.message);
+            }
+        }
+
+        // Parse participant data from textarea
+        function parseParticipants() {
+            // First check if we have CSV data
+            if (csvParticipants.length > 0) {
+                return csvParticipants;
+            }
+
+            // Otherwise parse from textarea
+            const data = document.getElementById('participantData').value.trim();
+            if (!data) return [];
+
+            const lines = data.split('\n').filter(line => line.trim());
+            return lines.map(line => {
+                const parts = line.split(',').map(p => p.trim());
+                return {
+                    name: parts[0] || '',
+                    department: parts[1] || ''
+                };
+            }).filter(p => p.name);
+        }
+
+        // Get current settings
+        function getSettings() {
+            return {
+                nameX: document.getElementById('nameX').value,
+                nameY: document.getElementById('nameY').value,
+                nameFontSize: document.getElementById('nameFontSize').value,
+                nameFont: document.getElementById('nameFont').value,
+                nameColor: document.getElementById('nameColor').value,
+                deptX: document.getElementById('deptX').value,
+                deptY: document.getElementById('deptY').value,
+                deptFontSize: document.getElementById('deptFontSize').value,
+                deptFont: document.getElementById('deptFont').value,
+                deptColor: document.getElementById('deptColor').value
+            };
+        }
+
+        // Add change listeners to all setting inputs
+        const settingInputs = [
+            'nameX', 'nameY', 'nameFontSize', 'nameFont', 'nameColor',
+            'deptX', 'deptY', 'deptFontSize', 'deptFont', 'deptColor'
+        ];
+
+        settingInputs.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.addEventListener('change', () => {
+                    const previewBtn = document.getElementById('previewBtn');
+                    if (previewBtn && !previewBtn.disabled) {
+                        previewBtn.textContent = '👁️ Preview Changes';
+                        previewBtn.style.background = 'linear-gradient(135deg, #ff9800 0%, #f44336 100%)';
+                    }
+                });
+            }
+        });
+
+        // Preview first certificate
+        document.getElementById('previewBtn').addEventListener('click', async () => {
+            participants = parseParticipants();
+            if (participants.length === 0) {
+                alert('Please add participant data!');
+                return;
+            }
+
+            if (!templateImage) {
+                alert('Please upload certificate template!');
+                return;
+            }
+
+            const settings = getSettings();
+            const requestData = {
+                template: templateImage,
+                name: participants[0].name,
+                department: participants[0].department,
+                ...settings
+            };
+
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    const previewImg = document.getElementById('previewImage');
+                    previewImg.src = result.image;
+                    document.getElementById('previewArea').style.display = 'block';
+                    previewImg.scrollIntoView({ behavior: 'smooth' });
+                    
+                    // Reset button
+                    const previewBtn = document.getElementById('previewBtn');
+                    previewBtn.textContent = '👁️ Preview First Certificate';
+                    previewBtn.style.background = 'linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%)';
+                } else {
+                    alert('Error generating preview: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        });
+
+        // Generate all certificates as a single ZIP download
+        document.getElementById('generateBtn').addEventListener('click', async () => {
+            participants = parseParticipants();
+            if (participants.length === 0) {
+                alert('Please add participant data!');
+                return;
+            }
+
+            if (!templateImage) {
+                alert('Please upload certificate template!');
+                return;
+            }
+
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            const statusText = document.getElementById('statusText');
+            const generateBtn = document.getElementById('generateBtn');
+
+            progressBar.style.display = 'block';
+            generateBtn.disabled = true;
+            statusText.textContent = `Generating ${participants.length} certificates...`;
+            progressFill.style.width = '50%';
+            progressFill.textContent = 'Processing...';
+
+            try {
+                const response = await fetch('/generate-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        template: templateImage,
+                        participants: participants,
+                        settings: getSettings()
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Server error');
+                }
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'certificates.zip';
+                link.click();
+                URL.revokeObjectURL(url);
+
+                progressFill.style.width = '100%';
+                progressFill.textContent = '100%';
+                statusText.textContent = `✅ Successfully generated ${participants.length} certificates! Check your downloads.`;
+            } catch (error) {
+                statusText.textContent = `❌ Error: ${error.message}`;
+            } finally {
+                generateBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
