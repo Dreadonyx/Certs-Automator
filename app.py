@@ -1,26 +1,28 @@
-from flask import Flask, render_template, request, send_file, jsonify
+from flask import Flask, render_template, request, send_file, jsonify, Response, stream_with_context
 from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
 import os
 import csv
 import zipfile
-from werkzeug.utils import secure_filename
+import smtplib
+import json
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
 os.makedirs('uploads', exist_ok=True)
 
-# Font mapping for Linux system fonts
 FONT_MAP = {
-    'arial.ttf': '/usr/share/fonts/noto/NotoSans-Regular.ttf',
+    'arial.ttf':   '/usr/share/fonts/noto/NotoSans-Regular.ttf',
     'georgia.ttf': '/usr/share/fonts/noto/NotoSerif-Regular.ttf',
-    'times.ttf': '/usr/share/fonts/noto/NotoSerif-Regular.ttf',
+    'times.ttf':   '/usr/share/fonts/noto/NotoSerif-Regular.ttf',
 }
 
-# Supported MIME types → (PIL format, file extension)
 IMAGE_FORMATS = {
     'image/png':  ('PNG',  'png'),
     'image/jpeg': ('JPEG', 'jpg'),
@@ -31,7 +33,6 @@ IMAGE_FORMATS = {
     'image/gif':  ('GIF',  'gif'),
 }
 
-# Export format override mapping (user-selected export format → PIL format, ext)
 EXPORT_FORMAT_MAP = {
     'png':  ('PNG',  'png'),
     'jpg':  ('JPEG', 'jpg'),
@@ -39,6 +40,15 @@ EXPORT_FORMAT_MAP = {
     'pdf':  ('PDF',  'pdf'),
 }
 
+SMTP_PRESETS = {
+    'gmail':   ('smtp.gmail.com', 587),
+    'outlook': ('smtp-mail.outlook.com', 587),
+    'yahoo':   ('smtp.mail.yahoo.com', 587),
+    'zoho':    ('smtp.zoho.com', 587),
+}
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
@@ -57,50 +67,44 @@ def load_font(font_family, size):
 
 
 def decode_template(template_data):
-    """Decode a base64 data-URL. Returns (PIL Image, pil_format, file_extension)."""
+    """Decode base64 data-URL → (PIL Image, pil_format, extension)."""
     header, raw = template_data.split(',', 1)
-    # header looks like: data:image/png;base64
     mime = header.split(':')[1].split(';')[0].lower()
     pil_format, ext = IMAGE_FORMATS.get(mime, ('PNG', 'png'))
     image = Image.open(io.BytesIO(base64.b64decode(raw)))
-    # Preserve original mode for JPEG (no alpha), convert others as needed
     if pil_format == 'JPEG' and image.mode in ('RGBA', 'P'):
         image = image.convert('RGB')
     return image, pil_format, ext
 
 
 def draw_certificate(template_image, name, department, settings):
-    """Draw name and department text onto a copy of the template. Returns PIL Image."""
-    certificate = template_image.copy()
-    draw = ImageDraw.Draw(certificate)
+    """Overlay name + department text on a copy of the template."""
+    cert = template_image.copy()
+    draw = ImageDraw.Draw(cert)
 
     name_font = load_font(settings.get('nameFont', 'arial.ttf'), int(settings.get('nameFontSize', 38)))
     dept_font = load_font(settings.get('deptFont', 'arial.ttf'), int(settings.get('deptFontSize', 32)))
 
     draw.text(
         (int(settings.get('nameX', 420)), int(settings.get('nameY', 270))),
-        name,
-        fill=hex_to_rgb(settings.get('nameColor', '#000000')),
-        font=name_font,
+        name, fill=hex_to_rgb(settings.get('nameColor', '#000000')), font=name_font,
     )
     draw.text(
         (int(settings.get('deptX', 76)), int(settings.get('deptY', 303))),
-        department,
-        fill=hex_to_rgb(settings.get('deptColor', '#000000')),
-        font=dept_font,
+        department, fill=hex_to_rgb(settings.get('deptColor', '#000000')), font=dept_font,
     )
-    return certificate
+    return cert
 
 
 def image_to_bytes(image, pil_format):
-    """Save PIL image to bytes in the given format."""
-    img_io = io.BytesIO()
+    buf = io.BytesIO()
     if pil_format in ('JPEG', 'PDF') and image.mode in ('RGBA', 'P'):
         image = image.convert('RGB')
-    image.save(img_io, pil_format)
-    img_io.seek(0)
-    return img_io.getvalue()
+    image.save(buf, pil_format)
+    return buf.getvalue()
 
+
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
@@ -109,34 +113,28 @@ def index():
 
 @app.route('/parse-csv', methods=['POST'])
 def parse_csv():
-    """Parse CSV file and return participant data."""
+    """Parse CSV → [{name, department, email}, …]"""
     try:
-        if 'csvFile' not in request.files:
+        if 'csvFile' not in request.files or request.files['csvFile'].filename == '':
             return jsonify({'success': False, 'error': 'No file uploaded'}), 400
 
-        file = request.files['csvFile']
+        stream = io.StringIO(request.files['csvFile'].stream.read().decode('UTF8'), newline=None)
+        rows = list(csv.reader(stream))
 
-        if file.filename == '':
-            return jsonify({'success': False, 'error': 'No file selected'}), 400
-
-        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
-        csv_reader = csv.reader(stream)
+        # Auto-detect header row
+        if rows and rows[0] and rows[0][0].strip().lower() in ('name', 'participant'):
+            rows = rows[1:]
 
         participants = []
-        next(csv_reader, None)  # Skip header row
-
-        for row in csv_reader:
-            if len(row) >= 1 and row[0].strip():
+        for row in rows:
+            if row and row[0].strip():
                 participants.append({
-                    'name': row[0].strip(),
-                    'department': row[1].strip() if len(row) > 1 else ''
+                    'name':       row[0].strip(),
+                    'department': row[1].strip() if len(row) > 1 else '',
+                    'email':      row[2].strip() if len(row) > 2 else '',
                 })
 
-        return jsonify({
-            'success': True,
-            'participants': participants,
-            'count': len(participants)
-        })
+        return jsonify({'success': True, 'participants': participants, 'count': len(participants)})
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -144,96 +142,145 @@ def parse_csv():
 
 @app.route('/generate', methods=['POST'])
 def generate_certificate():
-    """Generate a single certificate and return it as a base64 image."""
+    """Generate a single certificate (for preview). Returns base64 image."""
     try:
         data = request.json
-        template_image, pil_format, ext = decode_template(data.get('template'))
-        certificate = draw_certificate(
-            template_image,
-            name=data.get('name', ''),
-            department=data.get('department', ''),
-            settings=data,
-        )
-
-        img_bytes = image_to_bytes(certificate, pil_format)
-        mime = f"image/{ext}" if ext != 'jpg' else 'image/jpeg'
-
+        template_image, pil_format, ext = decode_template(data['template'])
+        cert = draw_certificate(template_image, data.get('name', ''), data.get('department', ''), data)
+        img_bytes = image_to_bytes(cert, pil_format)
+        mime = 'image/jpeg' if ext == 'jpg' else f'image/{ext}'
         return jsonify({
             'success': True,
-            'image': f"data:{mime};base64,{base64.b64encode(img_bytes).decode()}",
+            'image': f'data:{mime};base64,{base64.b64encode(img_bytes).decode()}',
             'ext': ext,
         })
-
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/generate-batch', methods=['POST'])
 def generate_batch():
-    """Generate certificates for all participants.
-
-    Returns a merged PDF if exportFormat='pdf', otherwise a ZIP of images.
-    """
+    """Batch generate → merged PDF or ZIP depending on exportFormat."""
     try:
         data = request.json
-        template_image, default_pil_format, default_ext = decode_template(data.get('template'))
+        template_image, default_fmt, default_ext = decode_template(data['template'])
         participants = data.get('participants', [])
         settings = data.get('settings', {})
 
         export_fmt = settings.get('exportFormat', 'same')
-        if export_fmt in EXPORT_FORMAT_MAP:
-            pil_format, ext = EXPORT_FORMAT_MAP[export_fmt]
-        else:
-            pil_format, ext = default_pil_format, default_ext
+        pil_format, ext = EXPORT_FORMAT_MAP.get(export_fmt, (default_fmt, default_ext))
 
-        # Build all certificate images
-        certificates = []
-        for participant in participants:
-            cert = draw_certificate(
-                template_image,
-                name=participant['name'],
-                department=participant.get('department', ''),
-                settings=settings,
-            )
-            if pil_format in ('JPEG', 'PDF') and cert.mode in ('RGBA', 'P'):
-                cert = cert.convert('RGB')
-            certificates.append(cert)
+        certs = []
+        for p in participants:
+            c = draw_certificate(template_image, p['name'], p.get('department', ''), settings)
+            if pil_format in ('JPEG', 'PDF') and c.mode in ('RGBA', 'P'):
+                c = c.convert('RGB')
+            certs.append(c)
 
         if pil_format == 'PDF':
-            # Merge all certificates into a single multi-page PDF
-            pdf_buffer = io.BytesIO()
-            if certificates:
-                certificates[0].save(
-                    pdf_buffer,
-                    'PDF',
-                    save_all=True,
-                    append_images=certificates[1:],
-                )
-            pdf_buffer.seek(0)
-            return send_file(
-                pdf_buffer,
-                mimetype='application/pdf',
-                as_attachment=True,
-                download_name='certificates.pdf',
-            )
-        else:
-            # Return a ZIP of individual image files
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for participant, cert in zip(participants, certificates):
-                    img_bytes = image_to_bytes(cert, pil_format)
-                    safe_name = participant['name'].replace(' ', '_')
-                    zf.writestr(f"{safe_name}_certificate.{ext}", img_bytes)
-            zip_buffer.seek(0)
-            return send_file(
-                zip_buffer,
-                mimetype='application/zip',
-                as_attachment=True,
-                download_name='certificates.zip',
-            )
+            buf = io.BytesIO()
+            if certs:
+                certs[0].save(buf, 'PDF', save_all=True, append_images=certs[1:])
+            buf.seek(0)
+            return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name='certificates.pdf')
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for p, c in zip(participants, certs):
+                zf.writestr(f"{p['name'].replace(' ', '_')}_certificate.{ext}", image_to_bytes(c, pil_format))
+        buf.seek(0)
+        return send_file(buf, mimetype='application/zip', as_attachment=True, download_name='certificates.zip')
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/send-certificates', methods=['POST'])
+def send_certificates():
+    """Generate + email each certificate. Streams SSE progress events."""
+    data = request.json
+
+    template_image, pil_format, ext = decode_template(data['template'])
+    participants = data.get('participants', [])
+    settings = data.get('settings', {})
+
+    # SMTP config
+    provider = data.get('smtpProvider', 'custom')
+    if provider in SMTP_PRESETS:
+        smtp_host, smtp_port = SMTP_PRESETS[provider]
+    else:
+        smtp_host = data.get('smtpHost', '')
+        smtp_port = int(data.get('smtpPort', 587))
+
+    smtp_user = data.get('smtpUser', '')
+    smtp_pass = data.get('smtpPass', '')
+    from_name = data.get('fromName', 'CertFlow')
+    subject   = data.get('emailSubject', 'Your Certificate')
+    body      = data.get('emailBody', 'Hi {name},\n\nPlease find your certificate attached.\n\nRegards,\nCertFlow')
+
+    export_fmt = settings.get('exportFormat', 'same')
+    out_fmt, out_ext = EXPORT_FORMAT_MAP.get(export_fmt, (pil_format, ext))
+    if out_fmt == 'PDF':
+        out_fmt, out_ext = pil_format, ext  # PDF doesn't make sense per-attachment here; use image format
+
+    def stream():
+        results = []
+        skipped = 0
+
+        try:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=15)
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'SMTP connection failed: {e}'})}\n\n"
+            return
+
+        total = len([p for p in participants if p.get('email')])
+
+        for i, p in enumerate(participants):
+            email_addr = p.get('email', '').strip()
+            if not email_addr:
+                skipped += 1
+                yield f"data: {json.dumps({'type': 'skip', 'name': p['name'], 'reason': 'no email'})}\n\n"
+                continue
+
+            try:
+                cert = draw_certificate(template_image, p['name'], p.get('department', ''), settings)
+                cert_bytes = image_to_bytes(cert, out_fmt)
+
+                personal_body = body.replace('{name}', p['name']).replace('{department}', p.get('department', ''))
+
+                msg = MIMEMultipart()
+                msg['From']    = f'{from_name} <{smtp_user}>'
+                msg['To']      = email_addr
+                msg['Subject'] = subject.replace('{name}', p['name'])
+                msg.attach(MIMEText(personal_body, 'plain'))
+
+                filename = f"{p['name'].replace(' ', '_')}_certificate.{out_ext}"
+                attachment = MIMEApplication(cert_bytes, Name=filename)
+                attachment['Content-Disposition'] = f'attachment; filename="{filename}"'
+                msg.attach(attachment)
+
+                server.sendmail(smtp_user, email_addr, msg.as_string())
+                results.append({'name': p['name'], 'status': 'sent'})
+                yield f"data: {json.dumps({'type': 'sent', 'name': p['name'], 'email': email_addr, 'index': i+1, 'total': total})}\n\n"
+
+            except Exception as e:
+                results.append({'name': p['name'], 'status': 'failed', 'reason': str(e)})
+                yield f"data: {json.dumps({'type': 'failed', 'name': p['name'], 'email': email_addr, 'reason': str(e)})}\n\n"
+
+        try:
+            server.quit()
+        except Exception:
+            pass
+
+        sent  = sum(1 for r in results if r['status'] == 'sent')
+        failed = sum(1 for r in results if r['status'] == 'failed')
+        yield f"data: {json.dumps({'type': 'done', 'sent': sent, 'failed': failed, 'skipped': skipped})}\n\n"
+
+    return Response(stream_with_context(stream()), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 if __name__ == '__main__':

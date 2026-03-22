@@ -44,23 +44,72 @@ body {
     margin: 0 auto;
 }
 
-/* Header */
+/* Header / Branding */
 .header {
-    margin-bottom: 32px;
+    margin-bottom: 28px;
 }
 
-.header h1 {
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.brand-icon {
     font-size: 22px;
-    font-weight: 700;
-    color: var(--text);
-    letter-spacing: -0.3px;
+    color: var(--primary);
+    line-height: 1;
 }
 
-.header p {
+.brand-name {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.5px;
+}
+
+.tagline {
     color: var(--text-secondary);
-    margin-top: 4px;
     font-size: 13px;
 }
+
+/* Badge */
+.badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 7px;
+    border-radius: 99px;
+    background: var(--accent);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    vertical-align: middle;
+    margin-left: 6px;
+}
+
+/* Send log */
+.send-log {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    padding: 8px 12px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+.log-entry {
+    padding: 2px 0;
+    color: var(--text-secondary);
+}
+
+.log-success { color: var(--success); }
+.log-error   { color: var(--error); }
+.log-muted   { color: var(--text-muted); }
 
 /* Card / Section */
 .section {
@@ -107,6 +156,21 @@ body {
     margin-bottom: 16px;
     font-size: 13px;
     color: var(--warning-text);
+}
+
+.info-box a {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
+code {
+    background: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
+    color: var(--text);
 }
 
 /* Upload areas */
