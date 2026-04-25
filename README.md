@@ -1,8 +1,6 @@
-# certflow 📜
+# certflow 
 
-> Bulk certificate generator. Upload a template, add names, download a ZIP. Built for college events.
-
-Made this because generating 200 individual certificates by hand was not happening. Used it for AKIRA CTF at Velammal Engineering College and CYVENTURA at the CSE Cyber Security dept. It works.
+> Bulk certificate generator. Upload a template, add names, download a ZIP. Built for events.
 
 ## How it works
 
